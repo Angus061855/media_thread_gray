@@ -7,7 +7,7 @@ from google import genai
 
 # ── 環境變數 ──────────────────────────────────────────
 NOTION_TOKEN       = os.environ["NOTION_TOKEN"]
-NOTION_DATABASE_ID = os.environ["NOTION_DATABASE_ID_1"]
+NOTION_DATABASE_ID = os.environ["NOTION_DATABASE_ID"]
 GEMINI_API_KEY     = os.environ["GEMINI_API_KEY"]
 THREADS_USER_ID    = os.environ["THREADS_USER_ID"]
 THREADS_TOKEN      = os.environ["IG_ACCESS_TOKEN"]
