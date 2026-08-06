@@ -1,0 +1,39 @@
+name: Auto Post _2 (給主題自動發)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 13 * * *'
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip          # ← 加這段
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-post2
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Run post_2
+        env:
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          NOTION_TOKEN_2: ${{ secrets.NOTION_TOKEN_2 }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          NOTION_DATABASE_ID_2: ${{ secrets.NOTION_DATABASE_ID_2 }}
+          NOTION_PENDING_DATABASE_ID: ${{ secrets.NOTION_PENDING_DATABASE_ID }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          pip uninstall google-generativeai -y || true
+          pip install google-genai requests
+          python post_2.py

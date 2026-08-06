@@ -1,0 +1,68 @@
+name: Refresh Threads Token
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  refresh-token:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests PyNaCl
+
+      - name: Check and refresh token
+        env:
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          THREADS_APP_ID: ${{ secrets.THREADS_APP_ID }}
+          THREADS_APP_SECRET: ${{ secrets.THREADS_APP_SECRET }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          python - <<'EOF'
+          import requests, os, json, time
+          from base64 import b64encode
+          from nacl import encoding, public
+
+          token = os.environ["THREADS_ACCESS_TOKEN"]
+          app_id = os.environ["THREADS_APP_ID"]
+          app_secret = os.environ["THREADS_APP_SECRET"]
+          gh_pat = os.environ["GH_PAT"]
+          repo = os.environ["REPO"]
+
+          # 檢查剩餘天數
+          debug_url = f"https://graph.threads.net/debug_token?input_token={token}&access_token={app_id}|{app_secret}"
+          r = requests.get(debug_url)
+          data = r.json()
+          expires_at = data.get("data", {}).get("expires_at", 0)
+          now = int(time.time())
+          days_left = (expires_at - now) / 86400
+          print(f"Token 剩餘天數：{days_left:.1f} 天")
+
+          if days_left < 10:
+              print("開始換新 token...")
+              refresh_url = f"https://graph.threads.net/refresh_access_token?grant_type=th_refresh_token&access_token={token}"
+              new_token = requests.get(refresh_url).json().get("access_token")
+              if not new_token:
+                  print("換新失敗！")
+                  exit(1)
+
+              headers = {"Authorization": f"token {gh_pat}", "Accept": "application/vnd.github+json"}
+              key_data = requests.get(f"https://api.github.com/repos/{repo}/actions/secrets/public-key", headers=headers).json()
+              pk = public.PublicKey(key_data["key"].encode("utf-8"), encoding.Base64Encoder())
+              encrypted = b64encode(public.SealedBox(pk).encrypt(new_token.encode("utf-8"))).decode("utf-8")
+              result = requests.put(f"https://api.github.com/repos/{repo}/actions/secrets/THREADS_ACCESS_TOKEN", headers=headers, json={"encrypted_value": encrypted, "key_id": key_data["key_id"]})
+              print(f"Token 更新完成，狀態：{result.status_code}")
+          else:
+              print("Token 還夠用，不需要更新")
+          EOF
