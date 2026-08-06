@@ -64,6 +64,8 @@ def get_pending_topics():
     }
     payload = {"filter": {"property": "狀態", "status": {"equals": "待發"}}}
     res = requests.post(url, headers=headers, json=payload, timeout=30)
+    print("HTTP 狀態碼：", res.status_code)
+    print("回應內容：", res.text[:500])
     data = res.json()
     results = data.get("results", [])
     print(f"待發筆數：{len(results)}")
