@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import random
 import requests
 from google import genai
 
@@ -11,49 +12,38 @@ GEMINI_API_KEY     = os.environ["GEMINI_API_KEY"]
 THREADS_USER_ID    = os.environ["THREADS_USER_ID"]
 THREADS_TOKEN      = os.environ["IG_ACCESS_TOKEN"]
 
-EXAMPLE_POSTS = """
+EXAMPLE_POST = """
 以下是真實的發文範例，請完全學習這個風格、語氣、句子長度和換行方式：
 
-【範例第一則】
-短影音或IG真的不要再讓小姐入鏡了好嗎。
+【範例一】
+為什麼我從不叫小姐介紹小姐。
 
-我知道流量密碼真的都是拍到小姐，我也不管小姐是否同意，畢竟也許小姐當下覺得這行業很好玩，所以同意出鏡。
+不是因為我不信任她們。
 
-但過陣子呢。
+是因為這樣對介紹人不公平。
 
-他們說不定改變想法，想去做一般行業，被身邊認識的人認出來該怎麼辦，你們有想過嗎。
+她介紹了朋友來，朋友做得好，皆大歡喜。
 
-就算打馬賽克還是戴著一半的面具，身上的特徵也很容易找到的。
+但萬一朋友做得不開心，她要怎麼面對那個朋友？
 
-現在網友真的很厲害，有一點資訊都可以肉搜出來。
+我見過太多姐妹情因為這種事搞僵。
 
-【範例第二則】
-上個月，有個小姐跑來找我，她說她之前跟她經紀拍了幾支短影音。
+所以我的規矩是，妳自己來找我，妳自己做決定。
 
-她說她那時候覺得很新鮮，而且她經紀跟她說會打馬賽克，不會被認出來。
+不要讓別人的選擇，變成妳們之間的負擔。
 
-結果影片發出去之後，不到一個禮拜，她就被她高中同學認出來了。
+【範例二】
+有同行跟我說過，不簽合約，小姐遲早被洗走。
 
-她說她同學傳訊息給她，問她是不是在做酒店，她當下整個傻眼。
+我聽完只有一個想法。
 
-她說她那時候根本不知道該怎麼回，因為她根本沒想到會被認出來。
+如果她想走，那是我做得不夠好。
 
-後來她才發現，她手上有個很明顯的小刺青，而且她的體型跟髮型都很有特色。
+小姐有領我的底薪嗎？沒有。
 
-她同學就是靠這些特徵認出她的。
+那憑什麼綁著她？
 
-【範例第三則】
-她跟我說，哥我現在真的很後悔，因為我根本沒想到會這樣。
-
-她說她現在每天都活在恐懼中，怕被更多人認出來，怕被家人發現。
-
-她說她經紀還在那邊沾沾自喜，說那支影片帶了好幾個妹，賺了多少錢。
-
-但她呢，一輩子就這樣被掛上八大小姐的稱號。
-
-她說她問她經紀能不能把影片刪掉，結果她經紀跟她說，影片已經被轉發那麼多次了，刪掉也沒用。
-
-她跟我說，哥我真的很想哭，因為我覺得我的人生就這樣毀了。
+該是你的就會是你的，強求沒有用。
 """
 
 def send_telegram(message):
@@ -65,26 +55,28 @@ def send_telegram(message):
         timeout=30
     )
 
-def get_used_topics():
+def get_pending_topics():
     url = f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query"
     headers = {
         "Authorization": f"Bearer {NOTION_TOKEN}",
         "Notion-Version": "2022-06-28",
         "Content-Type": "application/json",
     }
-    used = []
-    payload = {}
-    while True:
-        res = requests.post(url, headers=headers, json=payload, timeout=30).json()
-        for page in res.get("results", []):
-            props = page.get("properties", {})
-            title_list = props.get("主題", {}).get("title", [])
-            if title_list:
-                used.append(title_list[0]["plain_text"])
-        if not res.get("has_more"):
-            break
-        payload["start_cursor"] = res["next_cursor"]
-    return used
+    payload = {"filter": {"property": "狀態", "status": {"equals": "待發"}}}
+    res = requests.post(url, headers=headers, json=payload, timeout=30)
+    data = res.json()
+    results = data.get("results", [])
+    print(f"待發筆數：{len(results)}")
+    return results
+
+def update_status(page_id, status="已發"):
+    url = f"https://api.notion.com/v1/pages/{page_id}"
+    headers = {
+        "Authorization": f"Bearer {NOTION_TOKEN}",
+        "Notion-Version": "2022-06-28",
+        "Content-Type": "application/json",
+    }
+    requests.patch(url, headers=headers, json={"properties": {"狀態": {"status": {"name": status}}}}, timeout=30)
 
 def clean_text(text):
     text = re.sub(r'\n?-{2,}\n?', '\n', text)
@@ -95,146 +87,38 @@ def clean_text(text):
     lines = [line.strip() for line in text.split('\n')]
     return '\n'.join(lines).strip()
 
-def truncate_to_chars(text, max_chars=480):
-    text = text.strip()
-    if len(text) <= max_chars:
-        if text and text[-1] not in '。！？':
-            for punct in ['。', '！', '？']:
-                idx = text.rfind(punct)
-                if idx > len(text) * 0.5:
-                    return text[:idx + 1]
-        return text
-    truncated = text[:max_chars]
-    last_break = -1
-    for punct in ['。', '！', '？']:
-        idx = truncated.rfind(punct)
-        if idx > last_break:
-            last_break = idx
-    if last_break > max_chars * 0.6:
-        return truncated[:last_break + 1]
-    idx = truncated.rfind('\n')
-    if idx > max_chars * 0.6:
-        return truncated[:idx]
-    return truncated
-
-def split_posts(content):
-    if '§' in content:
-        content_mod = re.sub(
-            r'\*{0,3}\s*§\s*([０-９\d]+)\s*\*{0,3}',
-            r'\n§SPLIT§\1\n',
-            content
-        )
-        parts = content_mod.split('\n§SPLIT§')
-        posts = []
-        for part in parts:
-            lines = part.split('\n')
-            if lines and re.match(r'^[０-９\d]+$', lines[0].strip()):
-                lines = lines[1:]
-            text = '\n'.join(lines).strip()
-            if text:
-                posts.append(text)
-        if len(posts) >= 3:
-            return posts
-
-    if re.search(r'\*{0,2}第[一二三四五六七八九十\d]+則\*{0,2}', content):
-        posts = re.split(r'\*{0,2}第[一二三四五六七八九十\d]+則\*{0,2}', content)
-        posts = [p.strip() for p in posts if p.strip()]
-        if len(posts) >= 3:
-            return posts
-
-    if re.search(r'^\d+[\.、．]\s', content, re.MULTILINE):
-        posts = re.split(r'^\d+[\.、．]\s', content, flags=re.MULTILINE)
-        posts = [p.strip() for p in posts if p.strip()]
-        if len(posts) >= 3:
-            return posts
-
-    return []
-
-def contains_person_name(text):
-    names = re.findall(r'(?<![.!?。！？\n])\b[A-Z][a-z]{1,10}\b', text)
-    if names:
-        print(f"⚠️ 偵測到疑似英文人名：{names}")
-        return True
-    return False
-
-def validate_output(text):
-    posts = split_posts(text)
-    if len(posts) < 3:
-        section_count = text.count('§')
-        return False, f"切割失敗：只切出 {len(posts)} 則，§ 出現 {section_count} 次。前200字：{repr(text[:200])}"
-    if contains_person_name(text):
-        return False, "包含英文人名"
-    return True, None
-
-def generate_post(used_topics):
-    used_str = "\n".join(f"- {t}" for t in used_topics) if used_topics else "（目前沒有已用主題）"
-
+def generate_post(custom_topic):
     prompt = f"""
-你是一位在八大行業做了7年的男性經紀人，現在在 Threads 上連續發文，目的是幫助想入行或已經在行業裡的女生保護自己、避免被黑心經紀騙。
+你是一位在八大行業做了7年的男性經紀人，現在在 Threads 上發文。
 
-【第一步：自己想題材】
-以下是已經用過的主題，【全部禁止重複】：
-{used_str}
+【主題】
+本次主題已指定為：「{custom_topic}」
 
-請根據以下方向，自由發揮，想一個還沒用過、有吸引力的新主題。
-第一行輸出「主題：[你選的主題]」
+{EXAMPLE_POST}
 
-{EXAMPLE_POSTS}
+【風格：直白觀點型】
+有立場、有邏輯，結尾收在一個觀念上。
+像一個有經驗的人在跟朋友說真話，不說教，不拐彎抹角。
+開頭直接切入觀點，不要有多餘的鋪陳。
+結尾一定要有一句收尾的觀念句，讓人有感。
 
-【角色設定】
-- 性別：男，身份：八大經紀人，做了7年
-- 口吻：像有經驗的前輩在跟朋友說話，不說教、不高高在上
-- 所有問題的來源只有一個：黑心經紀人，跟店家無關，不要提店家
-
-【文章結構】5到7則，依內容自行決定
-
-第一則：衝擊性開場，打破常見認知，製造懸念
-第二則：具體案例故事，帶出真實情境
-第三則：深化觀點，延續案例，說明後果與心情
-第四則：解釋現象背後的原因和機制
-第五則：實用建議或行動指南
-第六則：第二個案例或強化論點
-第七則：收尾昇華，引導留言或私訊（不要用「姐妹們」開頭）
-
-【字數規則】每則 200-280 個中文字，絕對不要超過 280 字
-一行不超過25個字。同一概念不空行，只有概念切換才空一行。
+【字數規則】
+整篇 150-300 字。
+一行不超過 20 個字。
+同一概念不空行，只有概念切換才空一行。
 
 【語言風格】
 台灣口語，每句獨立一行，句號後換行。
 用「妳」稱呼讀者，用「她」稱呼案例中的人。
-對話格式：「我問她，○○？」「她說，○○。」
 
 【寫作規則】
-1. 【絕對禁止】使用任何人名，包含英文名如 Katie、Amy、Lisa，一律用「有個小姐」「有個女生」「她」代替
+1. 禁止使用任何人名，一律用「有個小姐」「有個女生」「她」代替
 2. 禁止 emoji、粗體、斜體
 3. 標點符號全部使用全形（，。？！：）
-4. 禁止 AI 感用語、禁止「不是⋯而是⋯」句型
+4. 禁止「不是⋯而是⋯」句型
 5. 問題來源只能是「黑心經紀」或「經紀人」
 6. 禁止「姐妹們」「姊妹們」「妹子」「進場」
-
-【§ 格式規則 ── 最重要，必須嚴格遵守】
-
-輸出格式範例如下，必須完全照做：
-
-主題：[主題內容]
-
-§1
-（第一則內容）
-
-§2
-（第二則內容）
-
-§3
-（第三則內容）
-
-規則：
-- §符號後面直接接數字，中間絕對不可有空格，不可有星號
-- §那一行只能有§和數字，不能有其他任何文字
-- 禁止輸出 ---、***、** 等任何 Markdown 符號
-- 直接輸出內容，不要加說明文字
-
-【情緒曲線】
-第一則：震撼 → 第二則：同情 → 第三則：憤怒 → 第四則：恐懼 → 第五則：希望＋警惕 → 第六則：強化警惕 → 第七則：信任＋行動呼籲
+7. 直接輸出文章內容，不要輸出主題標題、不要有任何說明文字
 """
 
     models_to_try = [
@@ -258,160 +142,94 @@ def generate_post(used_topics):
                     model=model,
                     contents=prompt
                 )
-                raw = response.text.strip()
-                cleaned = clean_text(raw)
-
-                print(f"📋 § 出現次數：{cleaned.count('§')}")
-                print(f"📋 前200字：{repr(cleaned[:200])}")
-
-                ok, reason = validate_output(cleaned)
-                if not ok:
-                    print(f"⚠️ 第 {attempt+1} 次不合格：{reason}")
-                    if attempt < 2:
-                        wait = 15 * (attempt + 1)
-                        print(f"等待 {wait} 秒後重試...")
-                        time.sleep(wait)
+                if not response.text:
+                    print(f"  回應為空，重試...")
                     continue
-
+                cleaned = clean_text(response.text.strip())
+                print(f"📋 前100字：{repr(cleaned[:100])}")
                 return cleaned
 
             except Exception as e:
                 err = str(e)
                 print(f"  第 {attempt+1} 次失敗：{err}")
                 if "503" in err:
-                    wait = 2 ** attempt * 10  # 10, 20, 40 秒
+                    wait = 2 ** attempt * 10
                     print(f"  503 過載，等 {wait} 秒...")
                     time.sleep(wait)
                 elif "429" in err:
-                    print(f"  429 額度已滿，直接換下一個模型")
-                    break  # 跳出 attempt 迴圈，換模型，不要再重試同一個
+                    print(f"  429 額度已滿，換下一個模型")
+                    break
                 else:
-                    raise  # 其他錯誤直接丟出
+                    raise
 
         print(f"  {model} 全部失敗，換下一個模型...")
 
     raise Exception("所有模型都失敗，放棄")
 
-def extract_topic(post_text):
-    for line in post_text.strip().split("\n"):
-        if line.startswith("主題："):
-            return line.replace("主題：", "").strip()
-    return "未知主題"
+def post_to_threads(text):
+    text = clean_text(text)
+    if len(text) > 500:
+        text = text[:500]
 
-def post_to_threads(post_text):
-    post_text = post_text.strip()
+    print(f"🚀 建立發文（{len(text)} 字元）| 預覽：{repr(text[:60])}")
 
-    # 直接從第一個 § 開始，丟掉前面所有主題備註文字
-    first_section = post_text.find('§')
-    if first_section == -1:
-        lines = post_text.split("\n")
-        content_lines = []
-        skip_topic = True
-        for line in lines:
-            if skip_topic and line.startswith("主題："):
-                skip_topic = False
-                continue
-            content_lines.append(line)
-        content = "\n".join(content_lines).strip()
-    else:
-        content = post_text[first_section:].strip()
+    create_url = f"https://graph.threads.net/v1.0/{THREADS_USER_ID}/threads"
+    data = {"media_type": "TEXT", "text": text, "access_token": THREADS_TOKEN}
+    res = requests.post(create_url, data=data, timeout=30).json()
+    creation_id = res.get("id")
+    if not creation_id:
+        raise Exception(f"建立 container 失敗：{res}")
 
-    posts = split_posts(content)
-    if len(posts) < 3:
-        raise Exception(f"段落切割異常，只切出 {len(posts)} 則。\n內容前300字：\n{content[:300]}")
+    time.sleep(8)
 
-    print(f"📝 共 {len(posts)} 則，準備發文...")
-    last_published_id = ""
+    for attempt in range(3):
+        print(f"📤 發布（第 {attempt+1} 次）...")
+        pub_res = requests.post(
+            f"https://graph.threads.net/v1.0/{THREADS_USER_ID}/threads_publish",
+            data={"creation_id": creation_id, "access_token": THREADS_TOKEN},
+            timeout=30
+        ).json()
+        if pub_res.get("id"):
+            print(f"✅ 發布成功：{pub_res['id']}")
+            return
+        elif pub_res.get("error", {}).get("is_transient"):
+            print(f"暫時性錯誤，等待 15 秒...")
+            time.sleep(15)
+        else:
+            raise Exception(f"發布失敗：{pub_res}")
 
-    for i, text in enumerate(posts):
-        text = clean_text(text)
-        text = text.replace("\\n", "\n")
-        text = truncate_to_chars(text, max_chars=480)
-
-        if not text:
-            print(f"⚠️ 第 {i+1} 則內容為空，跳過")
-            continue
-
-        print(f"🚀 建立第 {i+1} 則（{len(text)} 字元）| 預覽：{repr(text[:60])}")
-
-        create_url = f"https://graph.threads.net/v1.0/{THREADS_USER_ID}/threads"
-        data = {"media_type": "TEXT", "text": text, "access_token": THREADS_TOKEN}
-        if last_published_id:
-            data["reply_to_id"] = last_published_id
-
-        res = requests.post(create_url, data=data, timeout=30).json()
-        creation_id = res.get("id")
-        if not creation_id:
-            raise Exception(f"建立 container 失敗（第 {i+1} 則）：{res}")
-
-        time.sleep(8)
-
-        pub_res = None
-        for attempt in range(3):
-            print(f"📤 發布第 {i+1} 則（第 {attempt+1} 次）...")
-            pub_res = requests.post(
-                f"https://graph.threads.net/v1.0/{THREADS_USER_ID}/threads_publish",
-                data={"creation_id": creation_id, "access_token": THREADS_TOKEN},
-                timeout=30
-            ).json()
-            if pub_res.get("id"):
-                break
-            elif pub_res.get("error", {}).get("is_transient"):
-                print(f"暫時性錯誤，等待 15 秒...")
-                time.sleep(15)
-            else:
-                raise Exception(f"發布失敗（第 {i+1} 則）：{pub_res}")
-
-        if not pub_res or not pub_res.get("id"):
-            raise Exception(f"發布失敗超過重試次數（第 {i+1} 則）：{pub_res}")
-
-        last_published_id = pub_res["id"]
-        print(f"✅ 第 {i+1} 則發布成功：{last_published_id}")
-        time.sleep(8)
-
-def save_to_notion(topic, post_text):
-    lines = post_text.strip().split("\n")
-    content_lines = []
-    skip_topic = True
-    for line in lines:
-        if skip_topic and line.startswith("主題："):
-            skip_topic = False
-            continue
-        content_lines.append(line)
-    clean_content = "\n".join(content_lines).strip()
-
-    url = "https://api.notion.com/v1/pages"
-    headers = {
-        "Authorization": f"Bearer {NOTION_TOKEN}",
-        "Notion-Version": "2022-06-28",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "parent": {"database_id": NOTION_DATABASE_ID},
-        "properties": {
-            "主題": {"title": [{"text": {"content": topic}}]},
-            "預寫內容": {"rich_text": [{"text": {"content": clean_content[:2000]}}]},
-            "狀態": {"status": {"name": "已發"}}
-        }
-    }
-    res = requests.post(url, headers=headers, json=payload, timeout=30)
-    print("Notion 回應：", res.status_code)
+    raise Exception("發布失敗超過重試次數")
 
 if __name__ == "__main__":
+    print("=== Gray 1 直白觀點型 ===")
+    pages = get_pending_topics()
+    if not pages:
+        print("沒有待發主題，結束。")
+        send_telegram("⚠️ Gray 1 今日無待發主題")
+        exit(0)
+
+    page = random.choice(pages)
+    page_id = page["id"]
+    props = page.get("properties", {})
+    topic_list = props.get("主題", {}).get("title", [])
+    custom_topic = topic_list[0]["plain_text"] if topic_list else ""
+
+    if not custom_topic.strip():
+        print("主題為空，結束。")
+        update_status(page_id, "已發")
+        exit(0)
+
     try:
-        print("=== 自動生成模式 ===")
-        used_topics = get_used_topics()
-        print(f"共 {len(used_topics)} 個已用主題")
-        post_text = generate_post(used_topics)
+        print(f"📌 主題：{custom_topic}")
+        post_text = generate_post(custom_topic)
         print("貼文內容：\n", post_text)
-        topic = extract_topic(post_text)
-        print("📌 主題：", topic)
         post_to_threads(post_text)
-        save_to_notion(topic, post_text)
+        update_status(page_id, "已發")
         print("✅ 完成！")
-        send_telegram(f"✅ Thread White 1 自動發文成功！\n主題：{topic}")
+        send_telegram(f"✅ Gray 1 發文成功！\n主題：{custom_topic}")
     except Exception as e:
-        error_msg = f"❌ Thread White 1 發文失敗！\n錯誤原因：{str(e)}"
+        error_msg = f"❌ Gray 1 發文失敗！\n錯誤原因：{str(e)}"
         print(error_msg)
+        update_status(page_id, "失敗")
         send_telegram(error_msg)
         raise
