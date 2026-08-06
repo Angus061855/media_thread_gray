@@ -1,10 +1,8 @@
-name: Auto Post _3 (段落直接發)
-
+name: Auto Post _3 (條列型)
 on:
   workflow_dispatch:
   schedule:
     - cron: '0 11 * * *'
-
 jobs:
   post:
     runs-on: ubuntu-latest
@@ -13,25 +11,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Cache pip
         uses: actions/cache@v3
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          key: ${{ runner.os }}-pip-post3
           restore-keys: |
             ${{ runner.os }}-pip-
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
       - name: Run post_3
         env:
           THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
           IG_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
-          NOTION_TOKEN: ${{ secrets.NOTION_API_KEY }}
-          NOTION_TOKEN_2: ${{ secrets.NOTION_TOKEN_2 }}
-          NOTION_DATABASE_ID_3: ${{ secrets.NOTION_DATABASE_ID_3 }}
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID_3 }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python post_3.py
+        run: |
+          pip uninstall google-generativeai -y || true
+          pip install google-genai requests
+          python post_3.py
