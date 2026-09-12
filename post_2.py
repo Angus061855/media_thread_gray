@@ -59,26 +59,60 @@ def send_telegram(message):
 
 def get_pending_topics():
     url = f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query"
+
     headers = {
         "Authorization": f"Bearer {NOTION_TOKEN}",
         "Notion-Version": "2022-06-28",
         "Content-Type": "application/json",
     }
-    payload = {"filter": {"property": "狀態", "status": {"equals": "待發"}}}
-    res = requests.post(url, headers=headers, json=payload, timeout=30)
+
+    payload = {
+        "filter": {
+            "property": "狀態",
+            "status": {
+                "equals": "待發"
+            }
+        }
+    }
+
+    res = requests.post(
+        url,
+        headers=headers,
+        json=payload,
+        timeout=30
+    )
+
     data = res.json()
+
     results = data.get("results", [])
+
     print(f"待發筆數：{len(results)}")
+
     return results
 
 def update_status(page_id, status="已發"):
     url = f"https://api.notion.com/v1/pages/{page_id}"
+
     headers = {
         "Authorization": f"Bearer {NOTION_TOKEN}",
         "Notion-Version": "2022-06-28",
         "Content-Type": "application/json",
     }
-    requests.patch(url, headers=headers, json={"properties": {"狀態": {"status": {"name": status}}}}, timeout=30)
+
+    requests.patch(
+        url,
+        headers=headers,
+        json={
+            "properties": {
+                "狀態": {
+                    "status": {
+                        "name": status
+                    }
+                }
+            }
+        },
+        timeout=30
+    )
 
 def clean_text(text):
     text = re.sub(r'\n?-{2,}\n?', '\n', text)
@@ -86,8 +120,50 @@ def clean_text(text):
     text = re.sub(r'(?<!\*)\*(?!\*)', '', text)
     text = re.sub(r'^>\s*', '', text, flags=re.MULTILINE)
     text = re.sub(r'\n{3,}', '\n\n', text)
-    lines = [line.strip() for line in text.split('\n')]
+
+    lines = [
+        line.strip()
+        for line in text.split('\n')
+    ]
+
     return '\n'.join(lines).strip()
+
+def get_topic_from_property(page):
+    prop = page.get(
+        "properties",
+        {}
+    ).get(
+        "主題",
+        {}
+    )
+
+    prop_type = prop.get("type")
+
+    print(f"🔍 主題欄位類型：{prop_type}")
+
+    topic = ""
+
+    if prop_type == "title":
+        topic = "".join(
+            item.get("plain_text", "")
+            for item in prop.get("title", [])
+        )
+
+    elif prop_type == "rich_text":
+        topic = "".join(
+            item.get("plain_text", "")
+            for item in prop.get("rich_text", [])
+        )
+
+    elif prop_type == "formula":
+        formula = prop.get("formula", {})
+
+        if formula.get("type") == "string":
+            topic = formula.get("string") or ""
+
+    print(f"📌 讀到主題：{repr(topic[:100])}")
+
+    return topic.strip()
 
 def generate_post(custom_topic):
     prompt = f"""
@@ -98,11 +174,20 @@ def generate_post(custom_topic):
 
 {EXAMPLE_POST}
 
-【風格：條列型】
-清楚、資訊型、易讀。
-用「第一、第二、第三」或「有幾件事妳要知道」這類開頭帶出重點。
-每個重點獨立一行，簡短有力。
-結尾用一句話收尾。
+【風格：反差型】
+先講一個多數人第一眼會覺得合理、正常、甚至是好事的觀點。
+
+接著用實際經驗或邏輯翻轉這個看法。
+
+重點是製造「原來事情不是表面看起來那樣」的反差感。
+
+開頭直接講大家常見的想法。
+中間指出真正容易被忽略的問題。
+結尾收在一個清楚的觀點。
+
+不要故意唱反調。
+不要為了反差硬製造爭議。
+反差一定要有八大實際情境或利益邏輯支撐。
 
 【字數規則】
 整篇 150-200 字。
@@ -134,105 +219,223 @@ def generate_post(custom_topic):
 
     for model in models_to_try:
         print(f"🤖 使用模型：{model}")
+
         for attempt in range(3):
             try:
                 print(f"  第 {attempt+1} 次呼叫 Gemini...")
+
                 client = genai.Client(
                     api_key=GEMINI_API_KEY,
                     http_options={"timeout": 300000}
                 )
+
                 response = client.models.generate_content(
                     model=model,
                     contents=prompt
                 )
+
                 if not response.text:
-                    print(f"  回應為空，重試...")
+                    print("  回應為空，重試...")
                     continue
-                cleaned = clean_text(response.text.strip())
-                print(f"📋 前100字：{repr(cleaned[:100])}")
+
+                cleaned = clean_text(
+                    response.text.strip()
+                )
+
+                print(
+                    f"📋 前100字：{repr(cleaned[:100])}"
+                )
+
                 return cleaned
 
             except Exception as e:
                 err = str(e)
-                print(f"  第 {attempt+1} 次失敗：{err}")
+
+                print(
+                    f"  第 {attempt+1} 次失敗：{err}"
+                )
+
                 if "503" in err:
                     wait = 2 ** attempt * 10
-                    print(f"  503 過載，等 {wait} 秒...")
+
+                    print(
+                        f"  503 過載，等 {wait} 秒..."
+                    )
+
                     time.sleep(wait)
+
                 elif "429" in err:
-                    print(f"  429 額度已滿，換下一個模型")
+                    print(
+                        "  429 額度已滿，換下一個模型"
+                    )
+
                     break
+
                 else:
                     raise
 
-        print(f"  {model} 全部失敗，換下一個模型...")
+        print(
+            f"  {model} 全部失敗，換下一個模型..."
+        )
 
-    raise Exception("所有模型都失敗，放棄")
+    raise Exception(
+        "所有模型都失敗，放棄"
+    )
 
 def post_to_threads(text):
     text = clean_text(text)
+
     if len(text) > 500:
         text = text[:500]
 
-    print(f"🚀 建立發文（{len(text)} 字元）| 預覽：{repr(text[:60])}")
+    print(
+        f"🚀 建立發文（{len(text)} 字元）"
+        f"| 預覽：{repr(text[:60])}"
+    )
 
-    create_url = f"https://graph.threads.net/v1.0/{THREADS_USER_ID}/threads"
-    data = {"media_type": "TEXT", "text": text, "access_token": THREADS_TOKEN}
-    res = requests.post(create_url, data=data, timeout=30).json()
+    create_url = (
+        f"https://graph.threads.net/v1.0/"
+        f"{THREADS_USER_ID}/threads"
+    )
+
+    data = {
+        "media_type": "TEXT",
+        "text": text,
+        "access_token": THREADS_TOKEN
+    }
+
+    res = requests.post(
+        create_url,
+        data=data,
+        timeout=30
+    ).json()
+
     creation_id = res.get("id")
+
     if not creation_id:
-        raise Exception(f"建立 container 失敗：{res}")
+        raise Exception(
+            f"建立 container 失敗：{res}"
+        )
 
     time.sleep(8)
 
     for attempt in range(3):
-        print(f"📤 發布（第 {attempt+1} 次）...")
+        print(
+            f"📤 發布（第 {attempt+1} 次）..."
+        )
+
         pub_res = requests.post(
-            f"https://graph.threads.net/v1.0/{THREADS_USER_ID}/threads_publish",
-            data={"creation_id": creation_id, "access_token": THREADS_TOKEN},
+            f"https://graph.threads.net/v1.0/"
+            f"{THREADS_USER_ID}/threads_publish",
+            data={
+                "creation_id": creation_id,
+                "access_token": THREADS_TOKEN
+            },
             timeout=30
         ).json()
-        if pub_res.get("id"):
-            print(f"✅ 發布成功：{pub_res['id']}")
-            return
-        elif pub_res.get("error", {}).get("is_transient"):
-            print(f"暫時性錯誤，等待 15 秒...")
-            time.sleep(15)
-        else:
-            raise Exception(f"發布失敗：{pub_res}")
 
-    raise Exception("發布失敗超過重試次數")
+        if pub_res.get("id"):
+            print(
+                f"✅ 發布成功：{pub_res['id']}"
+            )
+            return
+
+        elif pub_res.get(
+            "error",
+            {}
+        ).get(
+            "is_transient"
+        ):
+            print(
+                "暫時性錯誤，等待 15 秒..."
+            )
+
+            time.sleep(15)
+
+        else:
+            raise Exception(
+                f"發布失敗：{pub_res}"
+            )
+
+    raise Exception(
+        "發布失敗超過重試次數"
+    )
 
 if __name__ == "__main__":
-    print("=== Gray 3 條列型 ===")
+    print("=== Gray 2 反差型 ===")
+
     pages = get_pending_topics()
+
     if not pages:
         print("沒有待發主題，結束。")
-        send_telegram("⚠️ Gray 3 今日無待發主題")
+
+        send_telegram(
+            "⚠️ Gray 2 今日無待發主題"
+        )
+
         exit(0)
 
     page = random.choice(pages)
+
     page_id = page["id"]
-    props = page.get("properties", {})
-    topic_list = props.get("主題", {}).get("title", [])
-    custom_topic = topic_list[0]["plain_text"] if topic_list else ""
+
+    custom_topic = get_topic_from_property(page)
 
     if not custom_topic.strip():
         print("主題為空，結束。")
-        update_status(page_id, "已發")
+
+        update_status(
+            page_id,
+            "已發"
+        )
+
         exit(0)
 
     try:
-        print(f"📌 主題：{custom_topic}")
-        post_text = generate_post(custom_topic)
-        print("貼文內容：\n", post_text)
-        post_to_threads(post_text)
-        update_status(page_id, "已發")
+        print(
+            f"📌 主題：{custom_topic}"
+        )
+
+        post_text = generate_post(
+            custom_topic
+        )
+
+        print(
+            "貼文內容：\n",
+            post_text
+        )
+
+        post_to_threads(
+            post_text
+        )
+
+        update_status(
+            page_id,
+            "已發"
+        )
+
         print("✅ 完成！")
-        send_telegram(f"✅ Gray 3 發文成功！\n主題：{custom_topic}")
+
+        send_telegram(
+            f"✅ Gray 2 發文成功！"
+            f"\n主題：{custom_topic}"
+        )
+
     except Exception as e:
-        error_msg = f"❌ Gray 3 發文失敗！\n錯誤原因：{str(e)}"
+        error_msg = (
+            f"❌ Gray 2 發文失敗！"
+            f"\n錯誤原因：{str(e)}"
+        )
+
         print(error_msg)
-        update_status(page_id, "失敗")
-        send_telegram(error_msg)
+
+        update_status(
+            page_id,
+            "失敗"
+        )
+
+        send_telegram(
+            error_msg
+        )
+
         raise
