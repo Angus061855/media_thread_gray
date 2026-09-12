@@ -526,7 +526,7 @@ def post_to_threads(content):
 if __name__ == "__main__":
 
     print(
-        "=== _4 段落直接發模式 ==="
+        "=== _6 段落直接發模式 ==="
     )
 
     posts = get_pending_posts()
