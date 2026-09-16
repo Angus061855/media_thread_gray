@@ -417,17 +417,14 @@ if __name__ == "__main__":
         print("✅ 完成！")
 
         send_telegram(
-            f"✅ Gray 2 發文成功！"
-            f"\n主題：{custom_topic}"
+            "✅ Gray 2 發文成功！"
         )
 
     except Exception as e:
-        error_msg = (
-            f"❌ Gray 2 發文失敗！"
-            f"\n錯誤原因：{str(e)}"
-        )
+        error_msg = "❌ Gray 2 發文失敗！"
 
         print(error_msg)
+        print(f"錯誤原因：{str(e)}")
 
         update_status(
             page_id,
