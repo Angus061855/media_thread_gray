@@ -229,10 +229,14 @@ if __name__ == "__main__":
         post_to_threads(post_text)
         update_status(page_id, "已發")
         print("✅ 完成！")
-        send_telegram(f"✅ Gray 3 發文成功！\n主題：{custom_topic}")
+        send_telegram("✅ Gray 3 發文成功！")
+
     except Exception as e:
-        error_msg = f"❌ Gray 3 發文失敗！\n錯誤原因：{str(e)}"
+        error_msg = "❌ Gray 3 發文失敗！"
+
         print(error_msg)
+        print(f"錯誤原因：{str(e)}")
+
         update_status(page_id, "失敗")
         send_telegram(error_msg)
         raise
